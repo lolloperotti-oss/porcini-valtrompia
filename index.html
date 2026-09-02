@@ -3,56 +3,67 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cerca Porcini — Valtrompia (Pro)</title>
+<title>Radar Porcini — Italia</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
 <style>
-  /* Stili originali intatti */
-  :root{ --bark: #2b2118; --moss-dark: #1f2b1c; --fungo: #b5551f; --fungo-light: #d9873f; --cream: #f2ead9; --paper: #f8f4ea; --line: #d8cdb4; --ink: #2b2118; --ink-soft: #5c5240; --font-body: 'Inter', sans-serif;}
-  body{ font-family: var(--font-body); background: var(--moss-dark); color: var(--ink); margin: 0; overflow: hidden; }
+  :root{ --bark: #2b2118; --moss-dark: #1f2b1c; --fungo: #b5551f; --fungo-light: #d9873f; --line: #d8cdb4; --ink-soft: #5c5240;}
+  body{ font-family: 'Inter', sans-serif; background: var(--moss-dark); color: var(--bark); margin: 0; overflow: hidden; }
   #app{ display: grid; grid-template-columns: 360px 1fr; height: 100vh; width: 100vw; }
-  #sidebar{ background: var(--paper); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow-y: auto; padding: 20px;}
+  #sidebar{ background: #f8f4ea; border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow-y: auto; padding: 20px;}
   #map-wrap{ position: relative; }
-  #map{ height: 100%; width: 100%; background: #cfd6c4; }
-  .btn{ padding: 10px 16px; border-radius: 7px; border: none; cursor: pointer; font-weight: 600; width: 100%; margin-top: 10px; background: var(--fungo); color: white;}
+  #map{ height: 100%; width: 100%; }
+  
+  .btn{ padding: 12px; border-radius: 7px; border: none; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; color: white;}
+  .btn-radar{ background: #e67e22; font-size: 15px; box-shadow: 0 4px 10px rgba(230,126,34,0.3);}
+  .btn-radar:active{ background: #d35400; }
+  .btn-save{ background: var(--fungo); }
+  
   .field { margin-bottom: 15px; }
   .field label { font-size: 12px; font-weight: bold; color: var(--ink-soft); display: block; margin-bottom: 5px; }
-  .field input, .field select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 5px; box-sizing: border-box; }
-  .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: white; padding: 10px; border-radius: 8px; border: 1px solid var(--line); }
-  @media (max-width: 860px){ #app{ grid-template-columns: 1fr; grid-template-rows: 50vh 50vh; } }
+  .field input { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 5px; box-sizing: border-box; }
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--line); }
+  
+  #loading { display: none; font-size: 13px; color: #d35400; font-weight: bold; text-align: center; margin-top: 10px; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(211,84,0,.3); border-radius: 50%; border-top-color: #d35400; animation: spin 1s ease-in-out infinite; margin-right: 5px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 860px){ 
+    #app{ grid-template-columns: 1fr; grid-template-rows: 45vh 55vh; }
+    #sidebar { padding: 15px; }
+  }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="sidebar">
-    <h2 style="margin-top:0; color:var(--bark);">Diario Porcini</h2>
-    <p style="font-size:13px; color:var(--ink-soft);">I tuoi punti sono salvati solo su questo dispositivo. I dati meteo arrivano dal satellite.</p>
+    <h2 style="margin-top:0; margin-bottom:5px;">🍄 Diario & Radar Live</h2>
+    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:20px;">Tocca la mappa per segnare un punto o scansionare l'area.</p>
     
+    <div class="field">
+      <label>Coordinate Selezionate</label>
+      <input type="text" id="coords" placeholder="Tocca la mappa..." readonly>
+    </div>
+
+    <!-- RADAR IN TEMPO REALE -->
+    <div style="background: #fff3e0; padding: 15px; border-radius: 8px; border: 1px solid #ffcc80; margin-bottom: 20px;">
+      <h3 style="margin-top:0; font-size:15px; color:#d35400;">📡 Radar Satellitare (5km)</h3>
+      <p style="font-size:11.5px; color:#7f8c8d; margin-top:-5px;">Cerca boschi, scarica meteo e calcola probabilità ovunque.</p>
+      <button class="btn btn-radar" onclick="avviaRadarLive()">Scansiona quest'area ora</button>
+      <div id="loading"><div class="spinner"></div> Connessione ai server in corso...</div>
+    </div>
+
+    <!-- DIARIO PERSONALE -->
     <div class="toggle-row">
-      <span style="font-size: 14px; font-weight: bold;">🍄 I Miei Punti Segreti</span>
+      <span style="font-size: 14px; font-weight: bold;">🍄 Mostra i miei punti</span>
       <input type="checkbox" id="toggle-personal" checked style="width: 20px; height: 20px;">
     </div>
     
-    <div class="toggle-row" style="background: #fff8e1; border-color: #f39c12;">
-      <span style="font-size: 14px; font-weight: bold; color: #d35400;">📡 Previsioni AI (Motore Notturno)</span>
-      <input type="checkbox" id="toggle-ai" style="width: 20px; height: 20px;">
-    </div>
-
-    <hr style="border: 0; border-top: 1px solid var(--line); margin: 20px 0;">
-    
-    <h3 style="margin-top:0;">Nuovo Ritrovamento</h3>
     <div class="field">
-      <label>Coordinate GPS (Clicca sulla mappa)</label>
-      <input type="text" id="coords" placeholder="Lat, Lng" readonly>
-    </div>
-    <div class="field">
-      <label>Quantità (Pezzi)</label>
+      <label>Quantità Ritrovamento (Pezzi)</label>
       <input type="number" id="qty" value="1">
     </div>
-    <button class="btn" onclick="salvaPunto()">Salva Punto nel Diario</button>
-    <button class="btn" onclick="esportaDati()" style="background: transparent; color: var(--ink-soft); border: 1px solid var(--line);">Esporta i miei dati (Backup)</button>
-    <p id="status" style="font-size:12px; color:green; margin-top:10px;"></p>
+    <button class="btn btn-save" onclick="salvaPunto()">Salva nel Diario Segreto</button>
   </div>
  
   <div id="map-wrap">
@@ -61,68 +72,161 @@
 </div>
  
 <script>
-  const map = L.map('map').setView([45.760, 10.280], 12);
+  // Inizializza mappa sull'Italia (Val Trompia come partenza)
+  const map = L.map('map').setView([45.760, 10.280], 11);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
   
   let personalLayer = L.layerGroup().addTo(map);
-  let aiLayer = L.layerGroup();
+  let radarLayer = L.layerGroup().addTo(map);
   let puntiPersonali = JSON.parse(localStorage.getItem('porcini:points')) || [];
+  let currentSelection = null;
+  let targetMarker = null;
 
-  // 1. GESTIONE PUNTI PERSONALI (LocalStorage)
+  // --- 1. GESTIONE MAPPA E DIARIO PRIVATO ---
+  map.on('click', (e) => {
+    currentSelection = { lat: e.latlng.lat, lng: e.latlng.lng };
+    document.getElementById('coords').value = `${currentSelection.lat.toFixed(5)}, ${currentSelection.lng.toFixed(5)}`;
+    
+    if(targetMarker) map.removeLayer(targetMarker);
+    targetMarker = L.circleMarker([currentSelection.lat, currentSelection.lng], {
+        radius: 8, color: '#e74c3c', weight: 2, fillColor: 'transparent'
+    }).addTo(map);
+  });
+
   function disegnaPuntiPersonali() {
     personalLayer.clearLayers();
     if(document.getElementById('toggle-personal').checked) {
       puntiPersonali.forEach(p => {
         L.circleMarker([p.lat, p.lng], { radius: 6 + (p.qty), color: '#2b2118', fillColor: '#b5551f', fillOpacity: 0.8 })
-         .bindPopup(`<b>Il tuo punto</b><br>${p.qty} esemplari trovati il ${p.date}`)
+         .bindPopup(`<b>Il tuo spot</b><br>${p.qty} esemplari il ${p.date}`)
          .addTo(personalLayer);
       });
     }
   }
   disegnaPuntiPersonali();
-
-  map.on('click', (e) => {
-    document.getElementById('coords').value = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
-  });
-
-  window.salvaPunto = function() {
-    const coords = document.getElementById('coords').value.split(',');
-    if(coords.length !== 2) return alert('Clicca sulla mappa prima!');
-    puntiPersonali.push({ lat: parseFloat(coords[0]), lng: parseFloat(coords[1]), qty: parseInt(document.getElementById('qty').value), date: new Date().toLocaleDateString() });
-    localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
-    disegnaPuntiPersonali();
-    document.getElementById('status').innerText = 'Punto salvato nel tuo telefono!';
-    setTimeout(() => document.getElementById('status').innerText='', 3000);
-  };
-
   document.getElementById('toggle-personal').onchange = disegnaPuntiPersonali;
 
-  // 2. GESTIONE MOTORE AI NOTTURNO (Legge dal Robot GitHub)
-  document.getElementById('toggle-ai').onchange = function(e) {
-    if(e.target.checked) {
-      map.addLayer(aiLayer);
-      fetch('previsioni.json').then(r => r.json()).then(dati => {
-        aiLayer.clearLayers();
-        dati.zone.forEach(z => {
-          let color = z.score >= 75 ? '#c0392b' : (z.score >= 50 ? '#e67e22' : '#f1c40f');
-          let cerchio = L.circle([z.lat, z.lng], { color: color, fillColor: color, fillOpacity: 0.4, radius: z.raggio || 300 });
-          cerchio.bindPopup(`
-            <b style="font-size:16px;">Probabilità: <span style="color:${color}">${z.score}%</span></b><br>
-            <b>Bosco:</b> ${z.tipo_bosco}<br>
-            <b>Pioggia 14gg:</b> ${z.dati.pioggia_mm} mm<br>
-            <b>Temp Suolo:</b> ${z.dati.temp_suolo} °C<br>
-            <b>Umidità Suolo:</b> ${(z.dati.umidita_suolo*100).toFixed(0)}%
-          `).addTo(aiLayer);
-        });
-      }).catch(e => alert("Nessun dato AI trovato. Aspetta il primo ciclo notturno."));
-    } else {
-      map.removeLayer(aiLayer);
-    }
+  window.salvaPunto = function() {
+    if(!currentSelection) return alert('Tocca prima un punto sulla mappa!');
+    puntiPersonali.push({ lat: currentSelection.lat, lng: currentSelection.lng, qty: parseInt(document.getElementById('qty').value), date: new Date().toLocaleDateString() });
+    localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
+    disegnaPuntiPersonali();
   };
 
-  window.esportaDati = function() {
-    const blob = new Blob([JSON.stringify(puntiPersonali, null, 2)], {type:'application/json'});
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'miei_porcini.json'; a.click();
+  // --- 2. IL MOTORE RADAR ON-DEMAND CON BYPASS DEGLI ERRORI ---
+  window.avviaRadarLive = async function() {
+    if(!currentSelection) return alert('Tocca la mappa per scegliere la zona da scansionare!');
+    
+    const loading = document.getElementById('loading');
+    loading.style.display = 'block';
+    radarLayer.clearLayers();
+    
+    const raggioKm = 5.0;
+    const lat = currentSelection.lat;
+    const lng = currentSelection.lng;
+    
+    // Disegna il perimetro di ricerca
+    L.circle([lat, lng], { radius: raggioKm * 1000, color: '#95a5a6', weight: 1, fillOpacity: 0.05, dashArray: '5, 5' }).addTo(radarLayer);
+
+    let boschi = [];
+
+    // FASE 1: Rilevamento Boschi
+    try {
+      const r_deg = raggioKm / 111.0;
+      const minLat = lat - r_deg, maxLat = lat + r_deg;
+      const minLng = lng - (r_deg / Math.cos(lat * Math.PI/180)), maxLng = lng + (r_deg / Math.cos(lat * Math.PI/180));
+      
+      const overpassQuery = `[out:json];(way["landuse"="forest"](${minLat},${minLng},${maxLat},${maxLng});way["natural"="wood"](${minLat},${minLng},${maxLat},${maxLng}););out center;`;
+      
+      const resOsm = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: overpassQuery });
+      if(!resOsm.ok) throw new Error("Satelliti offline");
+      
+      const dataOsm = await resOsm.json();
+      
+      boschi = dataOsm.elements.filter(e => e.center).map(e => {
+          let t = "Bosco Misto";
+          if(e.tags) {
+              if(e.tags.leaf_type === 'broadleaved') t = "Latifoglie (Faggio/Castagno)";
+              if(e.tags.leaf_type === 'needleleaved') t = "Conifere (Abete)";
+          }
+          return { lat: e.center.lat, lng: e.center.lon, tipo: t };
+      }).sort(() => 0.5 - Math.random()).slice(0, 25); 
+
+      if(boschi.length === 0) {
+          loading.style.display = 'none';
+          return alert('Nessun bosco rilevato dal satellite in questa zona (troppo urbanizzato o oltre il raggio).');
+      }
+    } catch(err) {
+      loading.style.display = 'none';
+      return alert('I server delle mappe satellitari sono momentaneamente fuori uso. Riprova tra poco.');
+    }
+
+    // FASE 2: Rilevamento Meteo e Bypass Errori (Assenza di Dati)
+    try {
+      const lats = boschi.map(b => b.lat.toFixed(4)).join(',');
+      const lngs = boschi.map(b => b.lng.toFixed(4)).join(',');
+      
+      // Chiamata all'API meteo centralizzata
+      const meteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lngs}&current=soil_temperature_0cm,soil_moisture_0_to_7cm&daily=precipitation_sum&past_days=14&timezone=Europe%2FRome`;
+      const resMeteo = await fetch(meteoUrl);
+      
+      // SE IL SERVER METEO CADE O E' IN MANUTENZIONE, INNESCA IL BYPASS
+      if(!resMeteo.ok) throw new Error("Server meteo down");
+
+      let dataMeteo = await resMeteo.json();
+      if(!Array.isArray(dataMeteo)) dataMeteo = [dataMeteo];
+
+      // Calcolo Algoritmo Micologico
+      boschi.forEach((b, index) => {
+          const m = dataMeteo[index];
+          if(!m || !m.daily) throw new Error("Dati corrotti");
+          
+          const pioggia14 = m.daily.precipitation_sum.slice(0,14).reduce((a,b)=>a+(b||0), 0);
+          const tSuolo = m.current.soil_temperature_0cm;
+          const uSuolo = m.current.soil_moisture_0_to_7cm;
+          
+          let score = 0;
+          if(pioggia14 >= 50) score += 45;
+          else if(pioggia14 > 15) score += (pioggia14 / 50) * 45;
+          
+          if(tSuolo >= 12 && tSuolo <= 20) score += 35;
+          else if(tSuolo >= 8 && tSuolo < 12) score += 15;
+          
+          if(uSuolo > 0.28) score += 20;
+          else if(uSuolo > 0.15) score += 10;
+          
+          if(b.tipo.includes("Latifoglie") && tSuolo > 14.5) score += 5;
+          if(b.tipo.includes("Conifere") && tSuolo < 15) score += 5;
+          
+          score = Math.min(100, Math.round(score));
+          
+          let color = score >= 75 ? '#c0392b' : (score >= 50 ? '#e67e22' : '#f1c40f');
+          let radius = score >= 75 ? 400 : 250;
+          
+          L.circle([b.lat, b.lng], { color: color, fillColor: color, fillOpacity: 0.45, weight: 1, radius: radius })
+           .bindPopup(`
+              <b style="font-size:15px;">Probabilità: <span style="color:${color}">${score}%</span></b><br>
+              ${b.tipo}<br>
+              <hr style="margin:5px 0;">
+              💧 Pioggia (14gg): <b>${pioggia14.toFixed(1)} mm</b><br>
+              🌡️ Temp. Terreno: <b>${tSuolo}°C</b><br>
+              💦 Umidità Terreno: <b>${(uSuolo*100).toFixed(0)}%</b>
+           `).addTo(radarLayer);
+      });
+
+    } catch(err) {
+      // ECCO IL TUO BYPASS: Se il server meteo non risponde, disegna i boschi in grigio con l'avviso
+      boschi.forEach(b => {
+          L.circle([b.lat, b.lng], { color: '#7f8c8d', fillColor: '#95a5a6', fillOpacity: 0.6, weight: 1, radius: 300 })
+           .bindPopup(`
+              <b>${b.tipo}</b><br>
+              <span style="color:#c0392b; font-weight:bold;">⚠️ Assenza di dati per server assente</span><br>
+              <span style="font-size:11px;">I server meteorologici per quest'area sono momentaneamente in manutenzione. Impossibile calcolare la probabilità.</span>
+           `).addTo(radarLayer);
+      });
+    }
+    
+    loading.style.display = 'none';
   };
 </script>
 </body>

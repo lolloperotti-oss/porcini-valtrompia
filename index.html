@@ -39,8 +39,11 @@
     <p id="stato-stazioni" style="font-size:11px; color:green; margin-bottom:20px;">Caricamento stazioni meteo dal server...</p>
     
     <div class="field">
-      <label>Coordinate (Tocca la mappa o scrivi qui)</label>
-      <input type="text" id="coords" placeholder="Es: 45.76058, 10.30157">
+      <label>Coordinate (Tocca mappa o usa GPS)</label>
+      <div style="display:flex; gap:5px;">
+        <input type="text" id="coords" placeholder="Es: 45.760, 10.301" style="flex:1;">
+        <button onclick="usaGps()" style="background:#2980b9; border:none; border-radius:5px; color:white; cursor:pointer; padding:0 15px; font-size:18px;" title="Rileva mia posizione">📍</button>
+      </div>
     </div>
 
     <!-- RADAR IN TEMPO REALE -->
@@ -83,7 +86,6 @@
   let targetMarker = null;
   let datiStazioni = [];
 
-  // --- CARICA I DATI NOTTURNI ---
   fetch('stazioni_meteo.json?nocache=' + new Date().getTime())
     .then(r => {
         if(!r.ok) throw new Error("File non trovato");
@@ -114,6 +116,26 @@
     return { lat: lat, lng: lng };
   }
 
+  // --- FUNZIONE GPS AGGIUNTA ---
+  window.usaGps = function() {
+    if ("geolocation" in navigator) {
+      document.getElementById('coords').value = "Ricerca GPS in corso...";
+      navigator.geolocation.getCurrentPosition((position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          document.getElementById('coords').value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+          if(targetMarker) map.removeLayer(targetMarker);
+          targetMarker = L.circleMarker([lat, lng], { radius: 8, color: '#e74c3c', weight: 2, fillColor: 'transparent' }).addTo(map);
+          map.setView([lat, lng], 13);
+      }, (error) => {
+          alert("Errore GPS: Assicurati di aver dato i permessi di localizzazione al browser.");
+          document.getElementById('coords').value = "";
+      });
+    } else {
+      alert("Il tuo browser non supporta il GPS.");
+    }
+  };
+
   map.on('click', (e) => {
     document.getElementById('coords').value = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
     if(targetMarker) map.removeLayer(targetMarker);
@@ -122,7 +144,6 @@
     }).addTo(map);
   });
 
-  // --- GESTIONE ELIMINAZIONE GLOBALE PROTETTA ---
   window.eliminaPunto = function(index) {
       if(confirm("Vuoi davvero eliminare questo punto dal diario?")) {
           puntiPersonali.splice(index, 1);
@@ -145,7 +166,6 @@
     if(document.getElementById('toggle-personal').checked) {
       puntiPersonali.forEach((p, index) => {
         let cerchio = L.circleMarker([p.lat, p.lng], { radius: 6 + (p.qty), color: '#2b2118', fillColor: '#b5551f', fillOpacity: 0.8 });
-        
         let container = document.createElement('div');
         container.innerHTML = `<b>Il tuo spot</b><br>${p.qty} esemplari il ${p.date}<br>`;
         let btn = document.createElement('button');
@@ -153,7 +173,6 @@
         btn.style.cssText = 'margin-top:8px; background:#c0392b; color:white; border:none; padding:5px; border-radius:4px; width:100%; cursor:pointer;';
         btn.onclick = function() { window.eliminaPunto(index); };
         container.appendChild(btn);
-        
         cerchio.bindPopup(container).addTo(personalLayer);
       });
     }
@@ -164,14 +183,12 @@
   window.salvaPunto = function() {
     const coord = ottieniCoordinate();
     if(!coord) return alert('Coordinate non valide. Usa il formato: 45.12345, 10.12345');
-    
     puntiPersonali.push({ lat: coord.lat, lng: coord.lng, qty: parseInt(document.getElementById('qty').value) || 1, date: new Date().toLocaleDateString() });
     localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
     disegnaPuntiPersonali();
     map.setView([coord.lat, coord.lng], 14);
   };
 
-  // --- MOTORE RADAR SATELLITARE (Con intestazione POST corretta) ---
   window.avviaRadarLive = async function() {
     const coord = ottieniCoordinate();
     if(!coord) return alert('Inserisci le coordinate o tocca la mappa per scegliere la zona da scansionare!');
@@ -195,18 +212,14 @@
       const r_deg = raggioKm / 111.0;
       const minLat = lat - r_deg, maxLat = lat + r_deg;
       const minLng = lng - (r_deg / Math.cos(lat * Math.PI/180)), maxLng = lng + (r_deg / Math.cos(lat * Math.PI/180));
-      
       const overpassQuery = `[out:json];(way["landuse"="forest"](${minLat},${minLng},${maxLat},${maxLng});way["natural"="wood"](${minLat},${minLng},${maxLat},${maxLng}););out center;`;
       
-      // Correzione Intestazione per impedire al satellite di rifiutare la richiesta
       const resOsm = await fetch("https://overpass-api.de/api/interpreter", { 
           method: "POST", 
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: "data=" + encodeURIComponent(overpassQuery)
       });
-      
       if(!resOsm.ok) throw new Error("Errore API Overpass");
-      
       const dataOsm = await resOsm.json();
       
       let boschi = dataOsm.elements.filter(e => e.center).map(e => {
@@ -237,11 +250,7 @@
           
           if(stazioneVicina.status === "errore") {
               L.circle([b.lat, b.lng], { color: '#7f8c8d', fillColor: '#95a5a6', fillOpacity: 0.6, weight: 1, radius: 300 })
-               .bindPopup(`
-                  <b>${b.tipo}</b><br>
-                  <span style="color:#c0392b; font-weight:bold;">⚠️ Assenza di dati: server assente</span><br>
-                  <span style="font-size:11px;">Centralina di riferimento (${stazioneVicina.nome}) momentaneamente offline o in manutenzione.</span>
-               `).addTo(radarLayer);
+               .bindPopup(`<b>${b.tipo}</b><br><span style="color:#c0392b; font-weight:bold;">⚠️ Assenza di dati</span><br><span style="font-size:11px;">Centralina (${stazioneVicina.nome}) offline.</span>`).addTo(radarLayer);
               return; 
           }
 
@@ -252,38 +261,32 @@
           
           if(pioggia14 >= 50) score += 45;
           else if(pioggia14 > 15) score += (pioggia14 / 50) * 45;
-          
           if(tSuolo >= 12 && tSuolo <= 20) score += 35;
           else if(tSuolo >= 8 && tSuolo < 12) score += 15;
-          
           if(uSuolo > 0.28) score += 20;
           else if(uSuolo > 0.15) score += 10;
-          
           if(b.tipo.includes("Latifoglie") && tSuolo > 14.5) score += 5;
           if(b.tipo.includes("Conifere") && tSuolo < 15) score += 5;
           
           score = Math.min(100, Math.round(score));
-          
           let color = score >= 75 ? '#c0392b' : (score >= 50 ? '#e67e22' : '#f1c40f');
           let radius = score >= 75 ? 400 : 250;
           
           L.circle([b.lat, b.lng], { color: color, fillColor: color, fillOpacity: 0.45, weight: 1, radius: radius })
            .bindPopup(`
               <b style="font-size:15px;">Probabilità: <span style="color:${color}">${score}%</span></b><br>
-              ${b.tipo}<br>
-              <hr style="margin:5px 0;">
+              ${b.tipo}<br><hr style="margin:5px 0;">
               <span style="font-size:11px;">Stazione: <b>${stazioneVicina.nome}</b> (${minDistanza.toFixed(1)} km)</span><br>
-              💧 Pioggia (14gg): <b>${pioggia14.toFixed(1)} mm</b><br>
-              🌡️ Temp. Terreno: <b>${tSuolo}°C</b><br>
-              💦 Umidità Terreno: <b>${(uSuolo*100).toFixed(0)}%</b>
+              💧 Pioggia: <b>${pioggia14.toFixed(1)} mm</b><br>
+              🌡️ Temp: <b>${tSuolo}°C</b><br>
+              💦 Umidità: <b>${(uSuolo*100).toFixed(0)}%</b>
            `).addTo(radarLayer);
       });
 
     } catch(err) {
       console.error(err);
-      alert('Errore di connessione ai satelliti per la mappa dei boschi. Il server è molto occupato, riprova tra qualche secondo.');
+      alert('Errore di connessione ai satelliti per la mappa dei boschi.');
     }
-    
     loading.style.display = 'none';
   };
 </script>

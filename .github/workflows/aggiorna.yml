@@ -31,6 +31,6 @@ jobs:
         run: |
           git config --global user.name "Radar Bot"
           git config --global user.email "bot@radar-funghi.local"
-          git add previsioni.json
+          git add stazioni_meteo.json
           git diff --quiet && git diff --staged --quiet || git commit -m "Aggiornamento meteo notturno"
           git push

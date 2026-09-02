@@ -64,7 +64,7 @@
     <button class="btn btn-save" onclick="salvaPunto()">Salva nel Diario Segreto</button>
     
     <div style="text-align:center; margin-top:15px;">
-        <a href="#" onclick="svuotaDiario()" style="color:#c0392b; font-size:11px; text-decoration:none;">⚠️ Elimina TUTTI i punti salvati</a>
+        <button onclick="svuotaDiario()" style="background:transparent; color:#c0392b; border:1px solid #c0392b; padding:8px; border-radius:4px; font-size:11px; cursor:pointer; width:100%;">⚠️ Elimina TUTTI i punti salvati</button>
     </div>
   </div>
  
@@ -83,7 +83,7 @@
   let targetMarker = null;
   let datiStazioni = [];
 
-  // --- CARICA I DATI NOTTURNI (Forzando lo sblocco della cache) ---
+  // --- CARICA I DATI NOTTURNI ---
   fetch('stazioni_meteo.json?nocache=' + new Date().getTime())
     .then(r => {
         if(!r.ok) throw new Error("File non trovato");
@@ -122,7 +122,7 @@
     }).addTo(map);
   });
 
-  // --- GESTIONE ELIMINAZIONE E DISEGNO PUNTI ---
+  // --- GESTIONE ELIMINAZIONE GLOBALE PROTETTA ---
   window.eliminaPunto = function(index) {
       if(confirm("Vuoi davvero eliminare questo punto dal diario?")) {
           puntiPersonali.splice(index, 1);
@@ -144,12 +144,17 @@
     personalLayer.clearLayers();
     if(document.getElementById('toggle-personal').checked) {
       puntiPersonali.forEach((p, index) => {
-        L.circleMarker([p.lat, p.lng], { radius: 6 + (p.qty), color: '#2b2118', fillColor: '#b5551f', fillOpacity: 0.8 })
-         .bindPopup(`
-            <b>Il tuo spot</b><br>${p.qty} esemplari il ${p.date}<br>
-            <button onclick="eliminaPunto(${index})" style="margin-top:8px; background:#c0392b; color:white; border:none; padding:5px; border-radius:4px; width:100%; cursor:pointer;">🗑️ Elimina</button>
-         `)
-         .addTo(personalLayer);
+        let cerchio = L.circleMarker([p.lat, p.lng], { radius: 6 + (p.qty), color: '#2b2118', fillColor: '#b5551f', fillOpacity: 0.8 });
+        
+        let container = document.createElement('div');
+        container.innerHTML = `<b>Il tuo spot</b><br>${p.qty} esemplari il ${p.date}<br>`;
+        let btn = document.createElement('button');
+        btn.innerHTML = '🗑️ Elimina';
+        btn.style.cssText = 'margin-top:8px; background:#c0392b; color:white; border:none; padding:5px; border-radius:4px; width:100%; cursor:pointer;';
+        btn.onclick = function() { window.eliminaPunto(index); };
+        container.appendChild(btn);
+        
+        cerchio.bindPopup(container).addTo(personalLayer);
       });
     }
   }
@@ -158,7 +163,7 @@
 
   window.salvaPunto = function() {
     const coord = ottieniCoordinate();
-    if(!coord) return alert('Coordinate non valide. Usa il formato: 45.12345, 10.12345 (Latitudine, Longitudine)');
+    if(!coord) return alert('Coordinate non valide. Usa il formato: 45.12345, 10.12345');
     
     puntiPersonali.push({ lat: coord.lat, lng: coord.lng, qty: parseInt(document.getElementById('qty').value) || 1, date: new Date().toLocaleDateString() });
     localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
@@ -166,7 +171,7 @@
     map.setView([coord.lat, coord.lng], 14);
   };
 
-  // --- MOTORE RADAR SATELLITARE ---
+  // --- MOTORE RADAR SATELLITARE (Con intestazione POST corretta) ---
   window.avviaRadarLive = async function() {
     const coord = ottieniCoordinate();
     if(!coord) return alert('Inserisci le coordinate o tocca la mappa per scegliere la zona da scansionare!');
@@ -193,7 +198,15 @@
       
       const overpassQuery = `[out:json];(way["landuse"="forest"](${minLat},${minLng},${maxLat},${maxLng});way["natural"="wood"](${minLat},${minLng},${maxLat},${maxLng}););out center;`;
       
-      const resOsm = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: overpassQuery });
+      // Correzione Intestazione per impedire al satellite di rifiutare la richiesta
+      const resOsm = await fetch("https://overpass-api.de/api/interpreter", { 
+          method: "POST", 
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "data=" + encodeURIComponent(overpassQuery)
+      });
+      
+      if(!resOsm.ok) throw new Error("Errore API Overpass");
+      
       const dataOsm = await resOsm.json();
       
       let boschi = dataOsm.elements.filter(e => e.center).map(e => {
@@ -267,7 +280,8 @@
       });
 
     } catch(err) {
-      alert('Errore di connessione ai satelliti per la mappa dei boschi.');
+      console.error(err);
+      alert('Errore di connessione ai satelliti per la mappa dei boschi. Il server è molto occupato, riprova tra qualche secondo.');
     }
     
     loading.style.display = 'none';

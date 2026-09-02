@@ -21,7 +21,7 @@
   
   .field { margin-bottom: 15px; }
   .field label { font-size: 12px; font-weight: bold; color: var(--ink-soft); display: block; margin-bottom: 5px; }
-  .field input { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 5px; box-sizing: border-box; }
+  .field input { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 5px; box-sizing: border-box; font-family: monospace;}
   .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--line); }
   
   #loading { display: none; font-size: 13px; color: #d35400; font-weight: bold; text-align: center; margin-top: 10px; }
@@ -39,8 +39,8 @@
     <p id="stato-stazioni" style="font-size:11px; color:green; margin-bottom:20px;">Caricamento stazioni meteo dal server...</p>
     
     <div class="field">
-      <label>Coordinate Selezionate</label>
-      <input type="text" id="coords" placeholder="Tocca la mappa..." readonly>
+      <label>Coordinate (Tocca la mappa o scrivi qui)</label>
+      <input type="text" id="coords" placeholder="Es: 45.76058, 10.30157">
     </div>
 
     <!-- RADAR IN TEMPO REALE -->
@@ -70,26 +70,27 @@
 </div>
  
 <script>
-  // Inizializza mappa sull'Italia (Val Trompia come partenza)
   const map = L.map('map').setView([45.760, 10.280], 10);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
   
   let personalLayer = L.layerGroup().addTo(map);
   let radarLayer = L.layerGroup().addTo(map);
   let puntiPersonali = JSON.parse(localStorage.getItem('porcini:points')) || [];
-  let currentSelection = null;
   let targetMarker = null;
   let datiStazioni = [];
 
   // --- CARICA I DATI NOTTURNI DEL ROBOT ---
   fetch('stazioni_meteo.json')
-    .then(r => r.json())
+    .then(r => {
+        if(!r.ok) throw new Error("File non trovato");
+        return r.json();
+    })
     .then(dati => {
         datiStazioni = dati.stazioni;
         document.getElementById('stato-stazioni').innerText = `✅ Database aggiornato al: ${dati.ultimo_aggiornamento}`;
     })
     .catch(e => {
-        document.getElementById('stato-stazioni').innerText = "⚠️ In attesa del calcolo notturno su GitHub...";
+        document.getElementById('stato-stazioni').innerText = "⚠️ In attesa del calcolo notturno su GitHub (Nessun dato trovato).";
     });
 
   function distanzaKm(lat1, lon1, lat2, lon2) {
@@ -98,13 +99,23 @@
     return 12742 * Math.asin(Math.sqrt(a)); 
   }
 
-  // --- GESTIONE MAPPA E DIARIO ---
+  // Estrae e pulisce le coordinate inserite manualmente o tramite click
+  function ottieniCoordinate() {
+    const val = document.getElementById('coords').value.replace(/ /g, '');
+    if(!val) return null;
+    const parts = val.split(',');
+    if(parts.length !== 2) return null;
+    const lat = parseFloat(parts[0]);
+    const lng = parseFloat(parts[1]);
+    if(isNaN(lat) || isNaN(lng)) return null;
+    return { lat: lat, lng: lng };
+  }
+
+  // Aggiorna il mirino quando tocchi la mappa
   map.on('click', (e) => {
-    currentSelection = { lat: e.latlng.lat, lng: e.latlng.lng };
-    document.getElementById('coords').value = `${currentSelection.lat.toFixed(5)}, ${currentSelection.lng.toFixed(5)}`;
-    
+    document.getElementById('coords').value = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
     if(targetMarker) map.removeLayer(targetMarker);
-    targetMarker = L.circleMarker([currentSelection.lat, currentSelection.lng], {
+    targetMarker = L.circleMarker([e.latlng.lat, e.latlng.lng], {
         radius: 8, color: '#e74c3c', weight: 2, fillColor: 'transparent'
     }).addTo(map);
   });
@@ -123,15 +134,21 @@
   document.getElementById('toggle-personal').onchange = disegnaPuntiPersonali;
 
   window.salvaPunto = function() {
-    if(!currentSelection) return alert('Tocca prima un punto sulla mappa!');
-    puntiPersonali.push({ lat: currentSelection.lat, lng: currentSelection.lng, qty: parseInt(document.getElementById('qty').value), date: new Date().toLocaleDateString() });
+    const coord = ottieniCoordinate();
+    if(!coord) return alert('Coordinate non valide. Usa il formato: 45.12345, 10.12345 (Latitudine, Longitudine)');
+    
+    puntiPersonali.push({ lat: coord.lat, lng: coord.lng, qty: parseInt(document.getElementById('qty').value) || 1, date: new Date().toLocaleDateString() });
     localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
     disegnaPuntiPersonali();
+    
+    // Sposta la mappa sul punto appena salvato
+    map.setView([coord.lat, coord.lng], 14);
   };
 
   // --- MOTORE RADAR CON GESTIONE ERRORI SERVER ---
   window.avviaRadarLive = async function() {
-    if(!currentSelection) return alert('Tocca la mappa per scegliere la zona da scansionare!');
+    const coord = ottieniCoordinate();
+    if(!coord) return alert('Inserisci le coordinate o tocca la mappa per scegliere la zona da scansionare!');
     if(datiStazioni.length === 0) return alert('Nessun dato meteo trovato. Assicurati che il robot GitHub abbia generato il file stazioni_meteo.json');
     
     const loading = document.getElementById('loading');
@@ -139,13 +156,17 @@
     radarLayer.clearLayers();
     
     const raggioKm = 5.0;
-    const lat = currentSelection.lat;
-    const lng = currentSelection.lng;
+    const lat = coord.lat;
+    const lng = coord.lng;
     
+    // Disegna il mirino anche se le coordinate sono state scritte a mano
+    if(targetMarker) map.removeLayer(targetMarker);
+    targetMarker = L.circleMarker([lat, lng], { radius: 8, color: '#e74c3c', weight: 2, fillColor: 'transparent' }).addTo(map);
+    map.setView([lat, lng], 12);
+
     L.circle([lat, lng], { radius: raggioKm * 1000, color: '#95a5a6', weight: 1, fillOpacity: 0.05, dashArray: '5, 5' }).addTo(radarLayer);
 
     try {
-      // 1. Trova i boschi dal satellite
       const r_deg = raggioKm / 111.0;
       const minLat = lat - r_deg, maxLat = lat + r_deg;
       const minLng = lng - (r_deg / Math.cos(lat * Math.PI/180)), maxLng = lng + (r_deg / Math.cos(lat * Math.PI/180));
@@ -169,9 +190,7 @@
           return alert('Nessun bosco rilevato in questa area (fuori raggio o zona urbana).');
       }
 
-      // 2. Associa il bosco alla centralina ARPA/Meteo scaricata di notte
       boschi.forEach(b => {
-          // Trova la stazione più vicina
           let stazioneVicina = datiStazioni[0];
           let minDistanza = distanzaKm(b.lat, b.lng, stazioneVicina.lat, stazioneVicina.lng);
           
@@ -183,19 +202,16 @@
               }
           }
           
-          // CONTROLLO ERRORI: Il server era in manutenzione stanotte?
           if(stazioneVicina.status === "errore") {
-              // Disegna in grigio con l'avviso
               L.circle([b.lat, b.lng], { color: '#7f8c8d', fillColor: '#95a5a6', fillOpacity: 0.6, weight: 1, radius: 300 })
                .bindPopup(`
                   <b>${b.tipo}</b><br>
                   <span style="color:#c0392b; font-weight:bold;">⚠️ Assenza di dati: server assente</span><br>
                   <span style="font-size:11px;">Centralina di riferimento (${stazioneVicina.nome}) momentaneamente offline o in manutenzione.</span>
                `).addTo(radarLayer);
-              return; // Salta il calcolo per questo bosco
+              return; 
           }
 
-          // SE IL SERVER FUNZIONA: Calcolo Algoritmo Micologico
           let score = 0;
           let pioggia14 = stazioneVicina.pioggia_14gg;
           let tSuolo = stazioneVicina.temp_suolo;

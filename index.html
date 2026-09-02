@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Radar Porcini Val Trompia</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <style>
+        body, html { height: 100%; margin: 0; font-family: sans-serif; background: #1f2b1c; }
+        #map { height: 100vh; width: 100vw; }
+        #info { position: absolute; top: 10px; left: 50px; z-index: 1000; background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h3 style="margin:0 0 5px 0;">Radar Val Trompia</h3>
+        <div id="status" style="font-size: 12px; color: #555;">Caricamento dati notturni...</div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        const map = L.map('map').setView([45.760, 10.280], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+
+        // Carica il file calcolato stanotte dal robot
+        fetch('previsioni.json')
+            .then(res => res.json())
+            .then(dati => {
+                document.getElementById('status').innerText = "Aggiornato il: " + dati.ultimo_aggiornamento;
+                
+                dati.zone.forEach(z => {
+                    // Colore in base alla probabilità
+                    let color = z.score >= 70 ? '#c0392b' : (z.score >= 40 ? '#e67e22' : '#f1c40f');
+                    
+                    let cerchio = L.circle([z.lat, z.lng], {
+                        color: color, fillColor: color, fillOpacity: 0.5, radius: 400
+                    }).addTo(map);
+                    
+                    cerchio.bindPopup(`
+                        <b>${z.zona}</b><br>
+                        Probabilità Buttata: <strong style="color:${color}; font-size:16px;">${z.score}%</strong><br>
+                        Pioggia 14gg: ${z.dati.pioggia_mm} mm<br>
+                        Temp. suolo: ${z.dati.temp} °C
+                    `);
+                });
+            })
+            .catch(err => {
+                document.getElementById('status').innerText = "In attesa del primo calcolo notturno...";
+            });
+    </script>
+</body>
+</html>

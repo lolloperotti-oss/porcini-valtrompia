@@ -25,9 +25,7 @@
   .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: white; padding: 12px; border-radius: 8px; border: 1px solid var(--line); }
   
   #loading { display: none; font-size: 13px; color: #d35400; font-weight: bold; text-align: center; margin-top: 10px; }
-  .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(211,84,0,.3); border-radius: 50%; border-top-color: #d35400; animation: spin 1s ease-in-out infinite; margin-right: 5px; vertical-align: middle; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
+  
   @media (max-width: 860px){ 
     #app{ grid-template-columns: 1fr; grid-template-rows: 45vh 55vh; }
     #sidebar { padding: 15px; }
@@ -38,7 +36,7 @@
 <div id="app">
   <div id="sidebar">
     <h2 style="margin-top:0; margin-bottom:5px;">🍄 Diario & Radar Live</h2>
-    <p style="font-size:12px; color:var(--ink-soft); margin-bottom:20px;">Tocca la mappa per segnare un punto o scansionare l'area.</p>
+    <p id="stato-stazioni" style="font-size:11px; color:green; margin-bottom:20px;">Caricamento stazioni meteo dal server...</p>
     
     <div class="field">
       <label>Coordinate Selezionate</label>
@@ -48,9 +46,9 @@
     <!-- RADAR IN TEMPO REALE -->
     <div style="background: #fff3e0; padding: 15px; border-radius: 8px; border: 1px solid #ffcc80; margin-bottom: 20px;">
       <h3 style="margin-top:0; font-size:15px; color:#d35400;">📡 Radar Satellitare (5km)</h3>
-      <p style="font-size:11.5px; color:#7f8c8d; margin-top:-5px;">Cerca boschi, scarica meteo e calcola probabilità ovunque.</p>
+      <p style="font-size:11.5px; color:#7f8c8d; margin-top:-5px;">Cerca boschi ovunque e usa i dati della centralina più vicina.</p>
       <button class="btn btn-radar" onclick="avviaRadarLive()">Scansiona quest'area ora</button>
-      <div id="loading"><div class="spinner"></div> Connessione ai server in corso...</div>
+      <div id="loading">Ricerca boschi in corso...</div>
     </div>
 
     <!-- DIARIO PERSONALE -->
@@ -73,7 +71,7 @@
  
 <script>
   // Inizializza mappa sull'Italia (Val Trompia come partenza)
-  const map = L.map('map').setView([45.760, 10.280], 11);
+  const map = L.map('map').setView([45.760, 10.280], 10);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
   
   let personalLayer = L.layerGroup().addTo(map);
@@ -81,8 +79,26 @@
   let puntiPersonali = JSON.parse(localStorage.getItem('porcini:points')) || [];
   let currentSelection = null;
   let targetMarker = null;
+  let datiStazioni = [];
 
-  // --- 1. GESTIONE MAPPA E DIARIO PRIVATO ---
+  // --- CARICA I DATI NOTTURNI DEL ROBOT ---
+  fetch('stazioni_meteo.json')
+    .then(r => r.json())
+    .then(dati => {
+        datiStazioni = dati.stazioni;
+        document.getElementById('stato-stazioni').innerText = `✅ Database aggiornato al: ${dati.ultimo_aggiornamento}`;
+    })
+    .catch(e => {
+        document.getElementById('stato-stazioni').innerText = "⚠️ In attesa del calcolo notturno su GitHub...";
+    });
+
+  function distanzaKm(lat1, lon1, lat2, lon2) {
+    const p = 0.017453292519943295;
+    const a = 0.5 - Math.cos((lat2 - lat1) * p)/2 + Math.cos(lat1 * p) * Math.cos(lat2 * p) * (1 - Math.cos((lon2 - lon1) * p))/2;
+    return 12742 * Math.asin(Math.sqrt(a)); 
+  }
+
+  // --- GESTIONE MAPPA E DIARIO ---
   map.on('click', (e) => {
     currentSelection = { lat: e.latlng.lat, lng: e.latlng.lng };
     document.getElementById('coords').value = `${currentSelection.lat.toFixed(5)}, ${currentSelection.lng.toFixed(5)}`;
@@ -113,9 +129,10 @@
     disegnaPuntiPersonali();
   };
 
-  // --- 2. IL MOTORE RADAR ON-DEMAND CON BYPASS DEGLI ERRORI ---
+  // --- MOTORE RADAR CON GESTIONE ERRORI SERVER ---
   window.avviaRadarLive = async function() {
     if(!currentSelection) return alert('Tocca la mappa per scegliere la zona da scansionare!');
+    if(datiStazioni.length === 0) return alert('Nessun dato meteo trovato. Assicurati che il robot GitHub abbia generato il file stazioni_meteo.json');
     
     const loading = document.getElementById('loading');
     loading.style.display = 'block';
@@ -125,13 +142,10 @@
     const lat = currentSelection.lat;
     const lng = currentSelection.lng;
     
-    // Disegna il perimetro di ricerca
     L.circle([lat, lng], { radius: raggioKm * 1000, color: '#95a5a6', weight: 1, fillOpacity: 0.05, dashArray: '5, 5' }).addTo(radarLayer);
 
-    let boschi = [];
-
-    // FASE 1: Rilevamento Boschi
     try {
+      // 1. Trova i boschi dal satellite
       const r_deg = raggioKm / 111.0;
       const minLat = lat - r_deg, maxLat = lat + r_deg;
       const minLng = lng - (r_deg / Math.cos(lat * Math.PI/180)), maxLng = lng + (r_deg / Math.cos(lat * Math.PI/180));
@@ -139,53 +153,54 @@
       const overpassQuery = `[out:json];(way["landuse"="forest"](${minLat},${minLng},${maxLat},${maxLng});way["natural"="wood"](${minLat},${minLng},${maxLat},${maxLng}););out center;`;
       
       const resOsm = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: overpassQuery });
-      if(!resOsm.ok) throw new Error("Satelliti offline");
-      
       const dataOsm = await resOsm.json();
       
-      boschi = dataOsm.elements.filter(e => e.center).map(e => {
+      let boschi = dataOsm.elements.filter(e => e.center).map(e => {
           let t = "Bosco Misto";
           if(e.tags) {
               if(e.tags.leaf_type === 'broadleaved') t = "Latifoglie (Faggio/Castagno)";
               if(e.tags.leaf_type === 'needleleaved') t = "Conifere (Abete)";
           }
           return { lat: e.center.lat, lng: e.center.lon, tipo: t };
-      }).sort(() => 0.5 - Math.random()).slice(0, 25); 
+      }).sort(() => 0.5 - Math.random()).slice(0, 30); 
 
       if(boschi.length === 0) {
           loading.style.display = 'none';
-          return alert('Nessun bosco rilevato dal satellite in questa zona (troppo urbanizzato o oltre il raggio).');
+          return alert('Nessun bosco rilevato in questa area (fuori raggio o zona urbana).');
       }
-    } catch(err) {
-      loading.style.display = 'none';
-      return alert('I server delle mappe satellitari sono momentaneamente fuori uso. Riprova tra poco.');
-    }
 
-    // FASE 2: Rilevamento Meteo e Bypass Errori (Assenza di Dati)
-    try {
-      const lats = boschi.map(b => b.lat.toFixed(4)).join(',');
-      const lngs = boschi.map(b => b.lng.toFixed(4)).join(',');
-      
-      // Chiamata all'API meteo centralizzata
-      const meteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lngs}&current=soil_temperature_0cm,soil_moisture_0_to_7cm&daily=precipitation_sum&past_days=14&timezone=Europe%2FRome`;
-      const resMeteo = await fetch(meteoUrl);
-      
-      // SE IL SERVER METEO CADE O E' IN MANUTENZIONE, INNESCA IL BYPASS
-      if(!resMeteo.ok) throw new Error("Server meteo down");
-
-      let dataMeteo = await resMeteo.json();
-      if(!Array.isArray(dataMeteo)) dataMeteo = [dataMeteo];
-
-      // Calcolo Algoritmo Micologico
-      boschi.forEach((b, index) => {
-          const m = dataMeteo[index];
-          if(!m || !m.daily) throw new Error("Dati corrotti");
+      // 2. Associa il bosco alla centralina ARPA/Meteo scaricata di notte
+      boschi.forEach(b => {
+          // Trova la stazione più vicina
+          let stazioneVicina = datiStazioni[0];
+          let minDistanza = distanzaKm(b.lat, b.lng, stazioneVicina.lat, stazioneVicina.lng);
           
-          const pioggia14 = m.daily.precipitation_sum.slice(0,14).reduce((a,b)=>a+(b||0), 0);
-          const tSuolo = m.current.soil_temperature_0cm;
-          const uSuolo = m.current.soil_moisture_0_to_7cm;
+          for(let i=1; i<datiStazioni.length; i++) {
+              let d = distanzaKm(b.lat, b.lng, datiStazioni[i].lat, datiStazioni[i].lng);
+              if(d < minDistanza) {
+                  minDistanza = d;
+                  stazioneVicina = datiStazioni[i];
+              }
+          }
           
+          // CONTROLLO ERRORI: Il server era in manutenzione stanotte?
+          if(stazioneVicina.status === "errore") {
+              // Disegna in grigio con l'avviso
+              L.circle([b.lat, b.lng], { color: '#7f8c8d', fillColor: '#95a5a6', fillOpacity: 0.6, weight: 1, radius: 300 })
+               .bindPopup(`
+                  <b>${b.tipo}</b><br>
+                  <span style="color:#c0392b; font-weight:bold;">⚠️ Assenza di dati: server assente</span><br>
+                  <span style="font-size:11px;">Centralina di riferimento (${stazioneVicina.nome}) momentaneamente offline o in manutenzione.</span>
+               `).addTo(radarLayer);
+              return; // Salta il calcolo per questo bosco
+          }
+
+          // SE IL SERVER FUNZIONA: Calcolo Algoritmo Micologico
           let score = 0;
+          let pioggia14 = stazioneVicina.pioggia_14gg;
+          let tSuolo = stazioneVicina.temp_suolo;
+          let uSuolo = stazioneVicina.umidita_suolo;
+          
           if(pioggia14 >= 50) score += 45;
           else if(pioggia14 > 15) score += (pioggia14 / 50) * 45;
           
@@ -208,6 +223,7 @@
               <b style="font-size:15px;">Probabilità: <span style="color:${color}">${score}%</span></b><br>
               ${b.tipo}<br>
               <hr style="margin:5px 0;">
+              <span style="font-size:11px;">Stazione: <b>${stazioneVicina.nome}</b> (${minDistanza.toFixed(1)} km)</span><br>
               💧 Pioggia (14gg): <b>${pioggia14.toFixed(1)} mm</b><br>
               🌡️ Temp. Terreno: <b>${tSuolo}°C</b><br>
               💦 Umidità Terreno: <b>${(uSuolo*100).toFixed(0)}%</b>
@@ -215,15 +231,7 @@
       });
 
     } catch(err) {
-      // ECCO IL TUO BYPASS: Se il server meteo non risponde, disegna i boschi in grigio con l'avviso
-      boschi.forEach(b => {
-          L.circle([b.lat, b.lng], { color: '#7f8c8d', fillColor: '#95a5a6', fillOpacity: 0.6, weight: 1, radius: 300 })
-           .bindPopup(`
-              <b>${b.tipo}</b><br>
-              <span style="color:#c0392b; font-weight:bold;">⚠️ Assenza di dati per server assente</span><br>
-              <span style="font-size:11px;">I server meteorologici per quest'area sono momentaneamente in manutenzione. Impossibile calcolare la probabilità.</span>
-           `).addTo(radarLayer);
-      });
+      alert('Errore di connessione ai satelliti per la mappa dei boschi.');
     }
     
     loading.style.display = 'none';

@@ -1,52 +1,129 @@
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
-    <title>Radar Porcini Val Trompia</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <style>
-        body, html { height: 100%; margin: 0; font-family: sans-serif; background: #1f2b1c; }
-        #map { height: 100vh; width: 100vw; }
-        #info { position: absolute; top: 10px; left: 50px; z-index: 1000; background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cerca Porcini — Valtrompia (Pro)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<style>
+  /* Stili originali intatti */
+  :root{ --bark: #2b2118; --moss-dark: #1f2b1c; --fungo: #b5551f; --fungo-light: #d9873f; --cream: #f2ead9; --paper: #f8f4ea; --line: #d8cdb4; --ink: #2b2118; --ink-soft: #5c5240; --font-body: 'Inter', sans-serif;}
+  body{ font-family: var(--font-body); background: var(--moss-dark); color: var(--ink); margin: 0; overflow: hidden; }
+  #app{ display: grid; grid-template-columns: 360px 1fr; height: 100vh; width: 100vw; }
+  #sidebar{ background: var(--paper); border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow-y: auto; padding: 20px;}
+  #map-wrap{ position: relative; }
+  #map{ height: 100%; width: 100%; background: #cfd6c4; }
+  .btn{ padding: 10px 16px; border-radius: 7px; border: none; cursor: pointer; font-weight: 600; width: 100%; margin-top: 10px; background: var(--fungo); color: white;}
+  .field { margin-bottom: 15px; }
+  .field label { font-size: 12px; font-weight: bold; color: var(--ink-soft); display: block; margin-bottom: 5px; }
+  .field input, .field select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 5px; box-sizing: border-box; }
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; background: white; padding: 10px; border-radius: 8px; border: 1px solid var(--line); }
+  @media (max-width: 860px){ #app{ grid-template-columns: 1fr; grid-template-rows: 50vh 50vh; } }
+</style>
 </head>
 <body>
-    <div id="info">
-        <h3 style="margin:0 0 5px 0;">Radar Val Trompia</h3>
-        <div id="status" style="font-size: 12px; color: #555;">Caricamento dati notturni...</div>
+<div id="app">
+  <div id="sidebar">
+    <h2 style="margin-top:0; color:var(--bark);">Diario Porcini</h2>
+    <p style="font-size:13px; color:var(--ink-soft);">I tuoi punti sono salvati solo su questo dispositivo. I dati meteo arrivano dal satellite.</p>
+    
+    <div class="toggle-row">
+      <span style="font-size: 14px; font-weight: bold;">🍄 I Miei Punti Segreti</span>
+      <input type="checkbox" id="toggle-personal" checked style="width: 20px; height: 20px;">
     </div>
+    
+    <div class="toggle-row" style="background: #fff8e1; border-color: #f39c12;">
+      <span style="font-size: 14px; font-weight: bold; color: #d35400;">📡 Previsioni AI (Motore Notturno)</span>
+      <input type="checkbox" id="toggle-ai" style="width: 20px; height: 20px;">
+    </div>
+
+    <hr style="border: 0; border-top: 1px solid var(--line); margin: 20px 0;">
+    
+    <h3 style="margin-top:0;">Nuovo Ritrovamento</h3>
+    <div class="field">
+      <label>Coordinate GPS (Clicca sulla mappa)</label>
+      <input type="text" id="coords" placeholder="Lat, Lng" readonly>
+    </div>
+    <div class="field">
+      <label>Quantità (Pezzi)</label>
+      <input type="number" id="qty" value="1">
+    </div>
+    <button class="btn" onclick="salvaPunto()">Salva Punto nel Diario</button>
+    <button class="btn" onclick="esportaDati()" style="background: transparent; color: var(--ink-soft); border: 1px solid var(--line);">Esporta i miei dati (Backup)</button>
+    <p id="status" style="font-size:12px; color:green; margin-top:10px;"></p>
+  </div>
+ 
+  <div id="map-wrap">
     <div id="map"></div>
+  </div>
+</div>
+ 
+<script>
+  const map = L.map('map').setView([45.760, 10.280], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  
+  let personalLayer = L.layerGroup().addTo(map);
+  let aiLayer = L.layerGroup();
+  let puntiPersonali = JSON.parse(localStorage.getItem('porcini:points')) || [];
 
-    <script>
-        const map = L.map('map').setView([45.760, 10.280], 12);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+  // 1. GESTIONE PUNTI PERSONALI (LocalStorage)
+  function disegnaPuntiPersonali() {
+    personalLayer.clearLayers();
+    if(document.getElementById('toggle-personal').checked) {
+      puntiPersonali.forEach(p => {
+        L.circleMarker([p.lat, p.lng], { radius: 6 + (p.qty), color: '#2b2118', fillColor: '#b5551f', fillOpacity: 0.8 })
+         .bindPopup(`<b>Il tuo punto</b><br>${p.qty} esemplari trovati il ${p.date}`)
+         .addTo(personalLayer);
+      });
+    }
+  }
+  disegnaPuntiPersonali();
 
-        // Carica il file calcolato stanotte dal robot
-        fetch('previsioni.json')
-            .then(res => res.json())
-            .then(dati => {
-                document.getElementById('status').innerText = "Aggiornato il: " + dati.ultimo_aggiornamento;
-                
-                dati.zone.forEach(z => {
-                    // Colore in base alla probabilità
-                    let color = z.score >= 70 ? '#c0392b' : (z.score >= 40 ? '#e67e22' : '#f1c40f');
-                    
-                    let cerchio = L.circle([z.lat, z.lng], {
-                        color: color, fillColor: color, fillOpacity: 0.5, radius: 400
-                    }).addTo(map);
-                    
-                    cerchio.bindPopup(`
-                        <b>${z.zona}</b><br>
-                        Probabilità Buttata: <strong style="color:${color}; font-size:16px;">${z.score}%</strong><br>
-                        Pioggia 14gg: ${z.dati.pioggia_mm} mm<br>
-                        Temp. suolo: ${z.dati.temp} °C
-                    `);
-                });
-            })
-            .catch(err => {
-                document.getElementById('status').innerText = "In attesa del primo calcolo notturno...";
-            });
-    </script>
+  map.on('click', (e) => {
+    document.getElementById('coords').value = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+  });
+
+  window.salvaPunto = function() {
+    const coords = document.getElementById('coords').value.split(',');
+    if(coords.length !== 2) return alert('Clicca sulla mappa prima!');
+    puntiPersonali.push({ lat: parseFloat(coords[0]), lng: parseFloat(coords[1]), qty: parseInt(document.getElementById('qty').value), date: new Date().toLocaleDateString() });
+    localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
+    disegnaPuntiPersonali();
+    document.getElementById('status').innerText = 'Punto salvato nel tuo telefono!';
+    setTimeout(() => document.getElementById('status').innerText='', 3000);
+  };
+
+  document.getElementById('toggle-personal').onchange = disegnaPuntiPersonali;
+
+  // 2. GESTIONE MOTORE AI NOTTURNO (Legge dal Robot GitHub)
+  document.getElementById('toggle-ai').onchange = function(e) {
+    if(e.target.checked) {
+      map.addLayer(aiLayer);
+      fetch('previsioni.json').then(r => r.json()).then(dati => {
+        aiLayer.clearLayers();
+        dati.zone.forEach(z => {
+          let color = z.score >= 75 ? '#c0392b' : (z.score >= 50 ? '#e67e22' : '#f1c40f');
+          let cerchio = L.circle([z.lat, z.lng], { color: color, fillColor: color, fillOpacity: 0.4, radius: z.raggio || 300 });
+          cerchio.bindPopup(`
+            <b style="font-size:16px;">Probabilità: <span style="color:${color}">${z.score}%</span></b><br>
+            <b>Bosco:</b> ${z.tipo_bosco}<br>
+            <b>Pioggia 14gg:</b> ${z.dati.pioggia_mm} mm<br>
+            <b>Temp Suolo:</b> ${z.dati.temp_suolo} °C<br>
+            <b>Umidità Suolo:</b> ${(z.dati.umidita_suolo*100).toFixed(0)}%
+          `).addTo(aiLayer);
+        });
+      }).catch(e => alert("Nessun dato AI trovato. Aspetta il primo ciclo notturno."));
+    } else {
+      map.removeLayer(aiLayer);
+    }
+  };
+
+  window.esportaDati = function() {
+    const blob = new Blob([JSON.stringify(puntiPersonali, null, 2)], {type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'miei_porcini.json'; a.click();
+  };
+</script>
 </body>
 </html>

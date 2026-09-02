@@ -62,6 +62,10 @@
       <input type="number" id="qty" value="1">
     </div>
     <button class="btn btn-save" onclick="salvaPunto()">Salva nel Diario Segreto</button>
+    
+    <div style="text-align:center; margin-top:15px;">
+        <a href="#" onclick="svuotaDiario()" style="color:#c0392b; font-size:11px; text-decoration:none;">⚠️ Elimina TUTTI i punti salvati</a>
+    </div>
   </div>
  
   <div id="map-wrap">
@@ -79,8 +83,8 @@
   let targetMarker = null;
   let datiStazioni = [];
 
-  // --- CARICA I DATI NOTTURNI DEL ROBOT ---
-  fetch('stazioni_meteo.json')
+  // --- CARICA I DATI NOTTURNI (Forzando lo sblocco della cache) ---
+  fetch('stazioni_meteo.json?nocache=' + new Date().getTime())
     .then(r => {
         if(!r.ok) throw new Error("File non trovato");
         return r.json();
@@ -99,7 +103,6 @@
     return 12742 * Math.asin(Math.sqrt(a)); 
   }
 
-  // Estrae e pulisce le coordinate inserite manualmente o tramite click
   function ottieniCoordinate() {
     const val = document.getElementById('coords').value.replace(/ /g, '');
     if(!val) return null;
@@ -111,7 +114,6 @@
     return { lat: lat, lng: lng };
   }
 
-  // Aggiorna il mirino quando tocchi la mappa
   map.on('click', (e) => {
     document.getElementById('coords').value = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
     if(targetMarker) map.removeLayer(targetMarker);
@@ -120,12 +122,33 @@
     }).addTo(map);
   });
 
+  // --- GESTIONE ELIMINAZIONE E DISEGNO PUNTI ---
+  window.eliminaPunto = function(index) {
+      if(confirm("Vuoi davvero eliminare questo punto dal diario?")) {
+          puntiPersonali.splice(index, 1);
+          localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
+          disegnaPuntiPersonali();
+          map.closePopup();
+      }
+  };
+
+  window.svuotaDiario = function() {
+      if(confirm("ATTENZIONE: Vuoi cancellare TUTTI i tuoi ritrovamenti? L'azione è irreversibile.")) {
+          puntiPersonali = [];
+          localStorage.removeItem('porcini:points');
+          disegnaPuntiPersonali();
+      }
+  };
+
   function disegnaPuntiPersonali() {
     personalLayer.clearLayers();
     if(document.getElementById('toggle-personal').checked) {
-      puntiPersonali.forEach(p => {
+      puntiPersonali.forEach((p, index) => {
         L.circleMarker([p.lat, p.lng], { radius: 6 + (p.qty), color: '#2b2118', fillColor: '#b5551f', fillOpacity: 0.8 })
-         .bindPopup(`<b>Il tuo spot</b><br>${p.qty} esemplari il ${p.date}`)
+         .bindPopup(`
+            <b>Il tuo spot</b><br>${p.qty} esemplari il ${p.date}<br>
+            <button onclick="eliminaPunto(${index})" style="margin-top:8px; background:#c0392b; color:white; border:none; padding:5px; border-radius:4px; width:100%; cursor:pointer;">🗑️ Elimina</button>
+         `)
          .addTo(personalLayer);
       });
     }
@@ -140,12 +163,10 @@
     puntiPersonali.push({ lat: coord.lat, lng: coord.lng, qty: parseInt(document.getElementById('qty').value) || 1, date: new Date().toLocaleDateString() });
     localStorage.setItem('porcini:points', JSON.stringify(puntiPersonali));
     disegnaPuntiPersonali();
-    
-    // Sposta la mappa sul punto appena salvato
     map.setView([coord.lat, coord.lng], 14);
   };
 
-  // --- MOTORE RADAR CON GESTIONE ERRORI SERVER ---
+  // --- MOTORE RADAR SATELLITARE ---
   window.avviaRadarLive = async function() {
     const coord = ottieniCoordinate();
     if(!coord) return alert('Inserisci le coordinate o tocca la mappa per scegliere la zona da scansionare!');
@@ -159,7 +180,6 @@
     const lat = coord.lat;
     const lng = coord.lng;
     
-    // Disegna il mirino anche se le coordinate sono state scritte a mano
     if(targetMarker) map.removeLayer(targetMarker);
     targetMarker = L.circleMarker([lat, lng], { radius: 8, color: '#e74c3c', weight: 2, fillColor: 'transparent' }).addTo(map);
     map.setView([lat, lng], 12);

@@ -24,7 +24,7 @@ jobs:
         run: pip install requests
 
       - name: Esegui il motore ARPA
-        run: python motore_arpa.py
+        run: python motore.py
 
       - name: Commit e push dei dati aggiornati
         run: |

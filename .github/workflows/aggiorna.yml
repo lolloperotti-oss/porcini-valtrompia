@@ -1,36 +1,35 @@
-name: Aggiorna Radar Funghi Notturno
+name: Aggiorna dati meteo porcini
 
 on:
   schedule:
-    - cron: '0 3 * * *' # Si avvia ogni notte alle 03:00
-  workflow_dispatch: # Ti permette di avviarlo anche a mano con un tasto
+    - cron: '0 3 * * *'   # ogni notte alle 03:00 UTC (~05:00 in Italia)
+  workflow_dispatch:        # ti permette anche di lanciarlo a mano dal tab "Actions"
 
 jobs:
-  aggiorna-dati:
+  aggiorna:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # necessario per poter fare il commit/push dei file aggiornati
 
     steps:
-      - name: Scarica il codice
+      - name: Scarica il repository
         uses: actions/checkout@v4
 
       - name: Prepara Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-          cache: 'pip'
+          python-version: '3.11'
 
-      - name: Installa pacchetti
-        run: pip install -r requirements.txt
+      - name: Installa le dipendenze
+        run: pip install requests
 
-      - name: Avvia il Motore
-        run: python motore.py
+      - name: Esegui il motore ARPA
+        run: python motore_arpa.py
 
-      - name: Salva i nuovi dati sulla mappa
+      - name: Commit e push dei dati aggiornati
         run: |
-          git config --global user.name "Radar Bot"
-          git config --global user.email "bot@radar-funghi.local"
-          git add stazioni_meteo.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Aggiornamento meteo notturno"
+          git config user.name "bot-porcini"
+          git config user.email "bot@users.noreply.github.com"
+          git add stazioni_meteo.json storico_pioggia.json
+          git commit -m "Aggiornamento dati meteo $(date +'%d/%m/%Y %H:%M')" || echo "Nessuna modifica da salvare"
           git push
